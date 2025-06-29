@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    name: Build and Release Provider
+    runs-on: ubuntu-latest
+
+    env:
+      PROVIDER_NAME: jenkins
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Set up GPG
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --import
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+
+      - name: Build Provider Binaries
+        run: |
+          VERSION=$(echo "${GITHUB_REF#refs/tags/}")
+          for GOOS in linux darwin windows; do
+            for GOARCH in amd64 arm64; do
+              BIN_NAME="terraform-provider-${PROVIDER_NAME}_$VERSION"
+              TARGET="terraform-provider-${PROVIDER_NAME}_$VERSION_${GOOS}_${GOARCH}.zip"
+              GOOS=$GOOS GOARCH=$GOARCH go build -o $BIN_NAME
+              zip $TARGET $BIN_NAME
+              echo "$TARGET" >> checksums.txt
+            done
+          done
+
+      - name: Generate SHA256SUMS
+        run: |
+          sha256sum terraform-provider-${PROVIDER_NAME}_*.zip > SHA256SUMS
+
+      - name: Sign SHA256SUMS
+        run: |
+          gpg --batch --yes --armor --output SHA256SUMS.sig --detach-sign SHA256SUMS
+
+      - name: Upload Release Artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            terraform-provider-${{ env.PROVIDER_NAME }}_*.zip
+            SHA256SUMS
+            SHA256SUMS.sig
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
