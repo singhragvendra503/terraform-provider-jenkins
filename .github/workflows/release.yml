@@ -44,12 +44,12 @@ jobs:
 
       - name: Generate SHA256SUMS
         run: |
-          sha256sum terraform-provider-${PROVIDER_NAME}_*.zip > SHA256SUMS
+          sha256sum terraform-provider-${PROVIDER_NAME}_*.zip > terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS
 
       - name: Sign SHA256SUMS
         run: |
             echo "Signing checksums"
-            gpg --batch --yes --pinentry-mode loopback --passphrase "${GPG_PASSPHRASE}" --armor --output SHA256SUMS.sig --detach-sign SHA256SUMS
+            gpg --batch --yes --pinentry-mode loopback --passphrase "${GPG_PASSPHRASE}" --armor --output terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS.sig --detach-sign terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS
         env:
             GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
