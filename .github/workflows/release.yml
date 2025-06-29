@@ -44,11 +44,13 @@ jobs:
 
       - name: Generate SHA256SUMS
         run: |
+          VERSION=$(echo "${GITHUB_REF#refs/tags/}")
           sha256sum terraform-provider-${PROVIDER_NAME}_*.zip > terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS
 
       - name: Sign SHA256SUMS
         run: |
             echo "Signing checksums"
+            VERSION=$(echo "${GITHUB_REF#refs/tags/}")
             gpg --batch --yes --pinentry-mode loopback --passphrase "${GPG_PASSPHRASE}" --armor --output terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS.sig --detach-sign terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS
         env:
             GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
@@ -59,5 +61,5 @@ jobs:
           token: ${{ secrets.GIT_TOKEN }}
           files: |
             terraform-provider-${{ env.PROVIDER_NAME }}_*.zip
-            terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS
-            terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS.sig
+            terraform-provider-${{ env.PROVIDER_NAME }}_*_SHA256SUMS
+            terraform-provider-${{ env.PROVIDER_NAME }}_*_SHA256SUMS.sig
