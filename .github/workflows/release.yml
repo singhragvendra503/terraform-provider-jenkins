@@ -24,9 +24,10 @@ jobs:
 
       - name: Set up GPG
         run: |
-          echo "$GPG_PRIVATE_KEY" | gpg --import
+            echo "$GPG_PRIVATE_KEY" | gpg --batch --yes --passphrase "${GPG_PASSPHRASE}" --pinentry-mode loopback --import
         env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+            GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+            GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
       - name: Build Provider Binaries
         run: |
