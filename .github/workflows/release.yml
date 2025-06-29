@@ -13,6 +13,11 @@ jobs:
     env:
       PROVIDER_NAME: jenkins
 
+    strategy:
+      matrix:
+        goos: [linux, windows, darwin]
+        goarch: [amd64, arm64]
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -24,39 +29,43 @@ jobs:
 
       - name: Set up GPG
         run: |
-            echo "$GPG_PRIVATE_KEY" | gpg --batch --yes --passphrase "${GPG_PASSPHRASE}" --pinentry-mode loopback --import
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --yes --pinentry-mode loopback --import
         env:
-            GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-            GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
-      - name: Build Provider Binaries
+      - name: Build Provider for ${{ matrix.goos }}_${{ matrix.goarch }}
         run: |
-          VERSION=$(echo "${GITHUB_REF#refs/tags/}")
-          for GOOS in linux darwin windows; do
-            for GOARCH in amd64 arm64; do
-              BIN_NAME="terraform-provider-${PROVIDER_NAME}_$VERSION"
-              TARGET="terraform-provider-${PROVIDER_NAME}_$VERSION_${GOOS}_${GOARCH}.zip"
-              GOOS=$GOOS GOARCH=$GOARCH go build -o $BIN_NAME
-              zip $TARGET $BIN_NAME
-              echo "$TARGET" >> checksums.txt
-            done
-          done
+          VERSION=${GITHUB_REF#refs/tags/v}
+          BIN_NAME=terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}
+          ZIP_NAME=${BIN_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
+
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o $BIN_NAME
+          zip $ZIP_NAME $BIN_NAME
+
+          echo "$ZIP_NAME" >> artifact-list.txt
 
       - name: Generate SHA256SUMS
+        if: ${{ matrix.goos == 'linux' && matrix.goarch == 'amd64' }} # only once
         run: |
-          VERSION=$(echo "${GITHUB_REF#refs/tags/}")
-          sha256sum terraform-provider-${PROVIDER_NAME}_*.zip > terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS
+          VERSION=${GITHUB_REF#refs/tags/v}
+          cat artifact-list.txt | xargs sha256sum > terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS
 
       - name: Sign SHA256SUMS
+        if: ${{ matrix.goos == 'linux' && matrix.goarch == 'amd64' }} # only once
         run: |
-            echo "Signing checksums"
-            VERSION=$(echo "${GITHUB_REF#refs/tags/}")
-            gpg --batch --yes --pinentry-mode loopback --passphrase "${GPG_PASSPHRASE}" --armor --output terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS.sig --detach-sign terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS
+          VERSION=${GITHUB_REF#refs/tags/v}
+          gpg --batch --yes --pinentry-mode loopback --armor \
+              --output terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS.sig \
+              --detach-sign terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS
         env:
-            GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
       - name: Upload Release Artifacts
         uses: softprops/action-gh-release@v2
+        if: ${{ matrix.goos == 'linux' && matrix.goarch == 'amd64' }} # upload once
         with:
           token: ${{ secrets.GIT_TOKEN }}
           files: |
