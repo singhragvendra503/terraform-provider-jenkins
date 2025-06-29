@@ -48,7 +48,10 @@ jobs:
 
       - name: Sign SHA256SUMS
         run: |
-          gpg --batch --yes --armor --output SHA256SUMS.sig --detach-sign SHA256SUMS
+            echo "Signing checksums"
+            gpg --batch --yes --pinentry-mode loopback --passphrase "${GPG_PASSPHRASE}" --armor --output SHA256SUMS.sig --detach-sign SHA256SUMS
+        env:
+            GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
       - name: Upload Release Artifacts
         uses: softprops/action-gh-release@v2
