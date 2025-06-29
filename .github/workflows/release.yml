@@ -31,7 +31,7 @@ jobs:
         run: |
           mkdir -p ~/.gnupg
           chmod 700 ~/.gnupg
-          echo "$GPG_PRIVATE_KEY" | gpg --batch --yes --pinentry-mode loopback --import
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --yes --passphrase "${GPG_PASSPHRASE}" --pinentry-mode loopback --import
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
@@ -57,7 +57,7 @@ jobs:
         if: ${{ matrix.goos == 'linux' && matrix.goarch == 'amd64' }} # only once
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          gpg --batch --yes --pinentry-mode loopback --armor \
+          gpg --batch --yes --pinentry-mode loopback --passphrase "${GPG_PASSPHRASE}" --armor \
               --output terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS.sig \
               --detach-sign terraform-provider-${{ env.PROVIDER_NAME }}_${VERSION}_SHA256SUMS
         env:
