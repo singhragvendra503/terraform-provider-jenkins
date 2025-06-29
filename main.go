@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"time"
+	// "time"
 
 	"github.com/bndr/gojenkins" // Jenkins API client
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
+	// "github.com/hashicorp/terraform-plugin-go/tfprotov6"
 )
 
 // Ensure the provider implements the required interfaces.
@@ -122,17 +123,15 @@ func (p *jenkinsProvider) Configure(ctx context.Context, req provider.ConfigureR
 	log.Printf("[INFO] Jenkins provider configured successfully for URL: %s", data.URL.ValueString())
 }
 
-// Resources returns a list of functions that construct resource implementations.
-func (p *jenkinsProvider) Resources(ctx context.Context, req provider.ResourcesRequest, resp *provider.ResourcesResponse) {
-	resp.Resources = []func() resource.Resource{
-		NewJenkinsPipelineResource, // Our custom Jenkins Pipeline resource
+func (p *jenkinsProvider) Resources(_ context.Context) []func() resource.Resource {
+	return []func() resource.Resource{
+		NewJenkinsPipelineResource,
 	}
 }
 
-// DataSources returns a list of functions that construct data source implementations.
-func (p *jenkinsProvider) DataSources(ctx context.Context, req provider.DataSourcesRequest, resp *provider.DataSourcesResponse) {
-	resp.DataSources = []func() datasource.DataSource{
-		NewJenkinsPipelineDataSource, // Our custom Jenkins Pipeline data source
+func (p *jenkinsProvider) DataSources(_ context.Context) []func() datasource.DataSource {
+	return []func() datasource.DataSource{
+		NewJenkinsPipelineDataSource,
 	}
 }
 
@@ -147,19 +146,7 @@ func New(version string) func() provider.Provider {
 
 // main is the entry point for the Terraform Jenkins provider.
 func main() {
-	// Set the provider name and version.
-	providerName := "jenkins"
-	version := "1.0.0" // Consider setting this from build flags in production
-
-	// Serve the provider using the Terraform Plugin Protocol v6.
-	err := tfprotov6.Serve(
-		providerName,
-		func() tfprotov6.ProviderServer {
-			return provider.NewProtocol6Server(New(version)())
-		},
-	)
-
-	if err != nil {
-		log.Fatalf("Error serving Jenkins provider: %s", err.Error())
-	}
+	providerserver.Serve(context.Background(), New("1.0.0"), providerserver.ServeOpts{
+		Address: "registry.terraform.io/your-org/jenkins",
+	})
 }

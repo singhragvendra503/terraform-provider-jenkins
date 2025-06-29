@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log" // Added for logging
 	"strings"
 	"time"
 
@@ -178,18 +178,19 @@ func (r *jenkinsPipelineResource) Create(ctx context.Context, req resource.Creat
 	configXML := buildPipelineConfigXML(description, groovyScript)
 
 	// Check if job already exists (idempotency)
-	exists, err := r.client.JobExists(ctx, jobName)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Client Error",
-			fmt.Sprintf("Failed to check if job '%s' exists: %s", jobName, err.Error()),
-		)
-		return
-	}
-	if exists {
+	// FIX: Use GetJob and check for error (e.g., 404) instead of JobExists
+	_, err := r.client.GetJob(ctx, jobName)
+	if err == nil {
 		resp.Diagnostics.AddError(
 			"Job Already Exists",
 			fmt.Sprintf("Jenkins job '%s' already exists. Consider importing it or using a different name.", jobName),
+		)
+		return
+	} else if !strings.Contains(err.Error(), "404") && !strings.Contains(err.Error(), "no such job") {
+		// If it's an error other than "not found", report it.
+		resp.Diagnostics.AddError(
+			"Client Error",
+			fmt.Sprintf("Failed to check if job '%s' exists: %s", jobName, err.Error()),
 		)
 		return
 	}
@@ -208,11 +209,10 @@ func (r *jenkinsPipelineResource) Create(ctx context.Context, req resource.Creat
 	job, err := r.client.GetJob(ctx, jobName)
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Jenkins Job Read Error",
+			"Jenkins Job Read Error After Create", // More specific error message
 			fmt.Sprintf("Failed to read created Jenkins Pipeline job '%s': %s", jobName, err.Error()),
 		)
-		// Even if read fails, we might still have created the job, so don't return early if it's just a read back issue.
-		// However, it's better to fail and let user retry apply if state is inconsistent.
+		// It's crucial that we can read the job back, otherwise state will be inconsistent.
 		return
 	}
 
@@ -241,25 +241,24 @@ func (r *jenkinsPipelineResource) Read(ctx context.Context, req resource.ReadReq
 
 	jobName := state.ID.ValueString() // Use ID from state to read
 
-	// Check if the job exists in Jenkins
-	exists, err := r.client.JobExists(ctx, jobName)
+	// Get the job details directly. gojenkins.GetJob handles checking existence.
+	job, err := r.client.GetJob(ctx, jobName)
 	if err != nil {
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "no such job") {
+			// Job no longer exists in Jenkins, remove from Terraform state
+			resp.State.RemoveResource(ctx)
+			log.Printf("[INFO] Jenkins Pipeline job '%s' not found, removing from state.", jobName)
+			return
+		}
 		resp.Diagnostics.AddError(
-			"Client Error",
-			fmt.Sprintf("Failed to check if job '%s' exists during read: %s", jobName, err.Error()),
+			"Jenkins Job Read Error",
+			fmt.Sprintf("Failed to get Jenkins job details for '%s': %s", jobName, err.Error()),
 		)
 		return
 	}
 
-	if !exists {
-		// Job no longer exists in Jenkins, remove from Terraform state
-		resp.State.RemoveResource(ctx)
-		log.Printf("[INFO] Jenkins Pipeline job '%s' not found, removing from state.", jobName)
-		return
-	}
-
-	// Get the job configuration XML from Jenkins
-	configXML, err := r.client.GetJobConfig(ctx, jobName)
+	// Get the job configuration XML from Jenkins using the job object
+	configXML, err := job.GetConfig(ctx) // FIX: Call GetConfig on the job object, not the client
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Jenkins Job Config Read Error",
@@ -275,7 +274,6 @@ func (r *jenkinsPipelineResource) Read(ctx context.Context, req resource.ReadReq
 			"Groovy Script Extraction Error",
 			fmt.Sprintf("Failed to extract Groovy script from job '%s' config: %s", jobName, err.Error()),
 		)
-		// Continue even if extraction fails, to at least set other known values.
 		groovyScript = "" // Set to empty string to avoid nil pointer
 	}
 
@@ -316,25 +314,42 @@ func (r *jenkinsPipelineResource) Update(ctx context.Context, req resource.Updat
 	newDescription := plan.Description.ValueString()
 	newGroovyScript := plan.GroovyScript.ValueString()
 
-	// Construct the updated Jenkins job XML
-	updatedConfigXML := buildPipelineConfigXML(newDescription, newGroovyScript)
-
-	// Update the job in Jenkins
-	_, err := r.client.UpdateJob(ctx, jobName, updatedConfigXML)
+	// Check if job exists before updating
+	_, err := r.client.GetJob(ctx, jobName)
 	if err != nil {
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "no such job") {
+			resp.Diagnostics.AddError(
+				"Jenkins Job Not Found For Update",
+				fmt.Sprintf("Cannot update job '%s' because it does not exist in Jenkins.", jobName),
+			)
+			resp.State.RemoveResource(ctx) // Remove from state if it's gone
+			return
+		}
 		resp.Diagnostics.AddError(
-			"Jenkins Job Update Error",
-			fmt.Sprintf("Failed to update Jenkins Pipeline job '%s': %s", jobName, err.Error()),
+			"Client Error During Update Check",
+			fmt.Sprintf("Failed to check if job '%s' exists before update: %s", jobName, err.Error()),
 		)
 		return
 	}
 
-	// Read back the updated job to ensure consistency and get actual state
+	// Construct the updated Jenkins job XML
+	updatedConfigXML := buildPipelineConfigXML(newDescription, newGroovyScript)
+
+	updatedJob := r.client.UpdateJob(ctx, jobName, updatedConfigXML)
+	if updatedJob == nil {
+		resp.Diagnostics.AddError(
+			"Jenkins Job Update Error",
+			fmt.Sprintf("Failed to update Jenkins Pipeline job '%s': returned job is nil", jobName),
+		)
+		return
+	}
+
+	// Re-fetch the job after update
 	job, err := r.client.GetJob(ctx, jobName)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Jenkins Job Read Error After Update",
-			fmt.Sprintf("Failed to read updated Jenkins Pipeline job '%s': %s", jobName, err.Error()),
+			fmt.Sprintf("Failed to re-read updated Jenkins job '%s': %s", jobName, err.Error()),
 		)
 		return
 	}
@@ -363,17 +378,17 @@ func (r *jenkinsPipelineResource) Delete(ctx context.Context, req resource.Delet
 	jobName := state.ID.ValueString()
 
 	// Check if job exists before attempting to delete (idempotency)
-	exists, err := r.client.JobExists(ctx, jobName)
+	_, err := r.client.GetJob(ctx, jobName)
 	if err != nil {
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "no such job") {
+			log.Printf("[INFO] Jenkins Pipeline job '%s' not found (already deleted).", jobName)
+			return // Job is already gone, nothing to do
+		}
 		resp.Diagnostics.AddError(
-			"Client Error",
+			"Client Error Before Deletion",
 			fmt.Sprintf("Failed to check if job '%s' exists before deletion: %s", jobName, err.Error()),
 		)
 		return
-	}
-	if !exists {
-		log.Printf("[INFO] Jenkins Pipeline job '%s' not found (already deleted).", jobName)
-		return // Job is already gone, nothing to do
 	}
 
 	// Delete the job from Jenkins
